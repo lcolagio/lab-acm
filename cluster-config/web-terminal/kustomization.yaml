@@ -4,6 +4,4 @@ kind: Kustomization
 bases:
 
 resources:
-- 0-cluster-admins-group.yaml
-- 0-users-group.yaml
-- 1-cluster-admins-rbac.yaml
+- 0-web-terminal-sub.yaml
