@@ -6,4 +6,4 @@ bases:
 resources:
 - 0-cluster-admins-group.yaml
 - 0-users-group.yaml
-- 1-cluster-admins-rbac.yaml
+# - 1-cluster-admins-rbac.yaml
