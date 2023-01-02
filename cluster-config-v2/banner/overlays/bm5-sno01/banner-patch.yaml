@@ -1,6 +1,6 @@
 - op: replace
   path: /spec/backgroundColor
-  value: '#bcceac'
+  value: '#6fa8dc'
 
 - op: replace
   path: /spec/text
