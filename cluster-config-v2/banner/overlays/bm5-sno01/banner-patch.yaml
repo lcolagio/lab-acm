@@ -1,0 +1,7 @@
+- op: replace
+  path: /spec/backgroundColor
+  value: '#bcceac'
+
+- op: replace
+  path: /spec/text
+  value: 'Your are logged on OCP ->bm5-sno01 - ' 
