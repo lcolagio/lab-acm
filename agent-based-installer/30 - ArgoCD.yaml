@@ -16,6 +16,7 @@ metadata:
     feature.open-cluster-management.io/addon-cert-policy-controller: unreachable
     feature.open-cluster-management.io/addon-cluster-proxy: unreachable
     feature.open-cluster-management.io/addon-search-collector: unreachable
+    vendor: OpenShift # Ajouter le label vendor=OpenShift pour les clusters à manager pour intégration dans ArgoCD    
     lab: luigi
     name: ${CLUSTER}
 spec:
