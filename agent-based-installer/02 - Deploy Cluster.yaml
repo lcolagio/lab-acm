@@ -1,0 +1,139 @@
+#############
+# OCP YAML
+#############
+
+# apiVersion: hive.openshift.io/v1
+# kind: ClusterImageSet
+# metadata:
+#   annotations:
+#     apps.open-cluster-management.io/hosting-subscription: open-cluster-management/hive-clusterimagesets-subscription-fast-0
+#     apps.open-cluster-management.io/reconcile-option: merge
+#   labels:
+#     app: hive-clusterimagesets
+#     app.kubernetes.io/managed-by: Helm
+#     channel: fast
+#     subscription-pause: 'false'
+#     visible: 'true'
+# spec:
+#   releaseImage: 'quay.io/openshift-release-dev/ocp-release:4.11.20-x86_64'
+
+> Associer le HostAgent au cluster
+
+HOST_AGENT=$(oc get agent -n ${CLUSTER} -o name)
+curl -s -k $(oc -n ${CLUSTER} get ${HOST_AGENT}  -o=jsonpath="{.status.debugInfo.eventsURL}") | jq "."
+oc -n ${CLUSTER} patch ${HOST_AGENT} -p '{"spec":{"clusterDeploymentName":{"name":'\"${CLUSTER}\"',"namespace":'\"${CLUSTER}\"'}}}' --type merge
+oc -n ${CLUSTER} get ${HOST_AGENT}  -o=jsonpath='{.spec.clusterDeploymentName}'
+
+
+oc apply -f -<<EOF
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  # annotations:
+  #   agentBareMetal-agentSelector/autoSelect: "false"
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+  labels:
+    cluster.open-cluster-management.io/clusterset: default
+    hive.openshift.io/cluster-platform: agent-baremetal
+spec:
+  baseDomain: redhat.hpecic.net
+  clusterInstallRef:
+    group: extensions.hive.openshift.io
+    kind: AgentClusterInstall
+    name: ${CLUSTER}
+    version: v1beta1
+  clusterName: ${CLUSTER}
+  controlPlaneConfig:
+    servingCertificates: {}
+  installed: false
+  platform:
+    agentBareMetal:
+      agentSelector:
+        matchLabels:
+          cluster-name: ${CLUSTER}
+  pullSecretRef:
+    name: pull-secret-${HOST_INVENTORY}
+
+
+---
+apiVersion: extensions.hive.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+spec:
+  clusterDeploymentRef:
+    name: ${CLUSTER}
+  # Pour démarrer l'installation automatiquement il faut positionner holdInstallation à false  
+  holdInstallation: false
+  imageSetRef:
+    name: img4.11.20-x86-64-appsub
+  networking:
+    clusterNetwork:
+      - cidr: 10.128.0.0/14
+        hostPrefix: 23
+    machineNetwork:
+      - cidr: 10.6.82.0/24
+    serviceNetwork:
+      - 172.30.0.0/16
+    userManagedNetworking: true
+  provisionRequirements:
+    controlPlaneAgents: 1
+  sshPublicKey: >-
+    ssh-rsa
+    AAAAB3NzaC1yc2EAAAADAQABAAAEAQCefCUYNfih7lQZJDd4hPZVlf5U4Kwc6DqAFQrKpD+rRrtRLJn5LVLIAa5pRE0xbl7cSsK5XqJVwQOtY9bXv6sdBmh7SHeMY61MOIrwZjDOZJuco6WYwBlCkMbzi/dcurFWcjIMc2N4fXnlrfWWRwBittoLktjwhlp6CpGy7SFoqrhXsX4Jb+aX12ZwgAGFV8laudjwE/Ou6aDMf6E/3kUbw7UOUkQ7Gzb8mRrdDuJtBK0ygRQGUoJYJydUfg5IqorwB59Omxj8GsqUH6xUud8VhlgvwYEnJXDngNvgoEhxa4vjv83vEIXoI8NZr7ft8ew9oaUmohSSG40mBYkzJUKDz/FO8zAjcW+JAWd2e/vPvYFzxXJ+uKVv/XKxsKB9oz9PQQG7OllT6DDlFORi6S75QjkqBgGGIbgRz6p93HCaRdA8Mc2J5/JYMZ/r/QHQG56rfZMEgYPIvgIDvSg3VtHJQp+oDCUCjMqFOU+Va2gqwV2RY8wPe7jkC7B3BFRzodpRP8Swm2rZSnJlp/ZAuD+FJv/OI3N2IqxFKXjnDR9ioUyvdFzmyEYpKheE7dtNpVGPyEVc3xhL69XgF4eDJvCAwVHjyn0ryR6Q3zFwUwurqRc60j+Myzikd1WD/5bv8fLYqcRLi+pEyAeAXZYWtpciW/V4xoVwXDKqy07j+ebBTGQblQZYEjH7J4zzpEFLdJekzhCWatmWx7kkq7LvE4Sa7SgVnaC+JMBPhcaWc2zEEyi8kMYpDVoRuRsxU0vtHfk5ZShGegzEfynnmabK/8YhDDXS5TVB1ycRndeDi+AkWVWZ9KsVdcHTImXM2x4SS1GxG5E9Fnw+1PdZ0YHbrpyyVr37/kVXy02hX8CunTYISFT7RVi+xEB5GfszX1tkzknBm/jd8bdAPUfSKWwuQEtqbk5emXexWrjAmKot6PUAY5NA1TFvgZCPEk6Uzla7lZGsMElee8sSy8IIBLLwpoMt5IpVuuo4csjxUD6vd9HrI6nS2Ms2UWuvL9Fv13WBb9sSh5uie92bk5sWE8yhYkPFzbZacV08OhMP8t/FepFlHuwEc/q+OWj51Zm54paLwTcuajpNaYZsvTarfPyLwxh5wk+1wZLlbvr1cPLEE/9BRFf1p+ab4jvtU9cXaN7BaUXJAXM4DnRLecG09APUH1QBPKuu9tL1wuSZvKIRav1TzO1DsMj/0F5grxTW3rcCUaqKqjUbbstLvfeph3W3RdRVxfEtqHlIwMi7gEzCB4lnL7Qn7rqyemWhagHqa9nyClCyDxG8tFXuaHtrRk1k/fbGxeDmQ5X4AbsXUqjRq095+cwF0Yr+t30YTOKLO5NA/WLJMYBQgh7ZkEMOLamrUdt1
+    lcolagio@MacBook-Pro
+
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: pull-secret-${HOST_INVENTORY}
+  namespace: ${CLUSTER}
+  labels:
+    cluster.open-cluster-management.io/backup: cluster
+data:
+  .dockerconfigjson: >-
+    <to complet>
+type: kubernetes.io/dockerconfigjson
+
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: ${CLUSTER}
+  labels:
+    cloud: hybrid
+    cluster.open-cluster-management.io/clusterset: default
+    feature.open-cluster-management.io/addon-cert-policy-controller: unreachable
+    feature.open-cluster-management.io/addon-cluster-proxy: unreachable
+    feature.open-cluster-management.io/addon-search-collector: unreachable
+    lab: luigi
+    name: ${CLUSTER}
+spec:
+  hubAcceptsClient: true
+  leaseDurationSeconds: 60
+
+---
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+spec:
+  applicationManager:
+    enabled: true
+  certPolicyController:
+    enabled: true
+  clusterLabels:
+    cloud: hybrid
+  clusterName: ${CLUSTER}
+  clusterNamespace: ${CLUSTER}
+  iamPolicyController:
+    enabled: true
+  policyController:
+    enabled: true
+  searchCollector:
+    enabled: true
+EOF

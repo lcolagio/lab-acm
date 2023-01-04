@@ -1,0 +1,139 @@
+#########################
+# A - Ajouter les clusters dans ArgoCD
+#########################
+
+> Ajouter le label vendor=OpenShift pour les clusters à manager
+
+oc apply -f -<<EOF
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: ${CLUSTER}
+  labels:
+    cloud: hybrid
+    cluster.open-cluster-management.io/clusterset: default
+    feature.open-cluster-management.io/addon-cert-policy-controller: unreachable
+    feature.open-cluster-management.io/addon-cluster-proxy: unreachable
+    feature.open-cluster-management.io/addon-search-collector: unreachable
+    lab: luigi
+    name: ${CLUSTER}
+spec:
+  hubAcceptsClient: true
+  leaseDurationSeconds: 60
+EOF  
+
+oc apply -f -<<EOF
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: all-openshift-clusters
+  namespace: openshift-gitops
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: vendor
+              operator: In
+              values:
+                - OpenShift
+EOF
+    
+oc apply -f -<<EOF
+---
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: gitops-clusters
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    argoNamespace: openshift-gitops
+    cluster: local-cluster
+  placementRef:
+    apiVersion: cluster.open-cluster-management.io/v1beta1
+    kind: Placement
+    name: all-openshift-clusters
+EOF
+
+
+#########################
+# B - Creer un clusterSet
+#########################
+
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: ManagedClusterSetBinding
+metadata:
+  name: bm-lco
+  namespace: openshift-gitops
+spec:
+  clusterSet: bm-lco
+
+> Ajouter les clusters dans le clusterSet via un label: cluster.open-cluster-management.io/clusterset: clusterset
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: bm5-sno01
+  labels:
+    ...
+    cluster.open-cluster-management.io/clusterset: bm-lco
+    vendor: OpenShift
+    name: bm5-sno01
+    ...
+
+#########################
+# C - Ajouter un applicationSet et faire un selector un placement spécifique
+#########################
+                
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  labels:
+    app.kubernetes.io/instance: acm-gitops
+  name: bm-lco
+  namespace: openshift-gitops
+spec:
+  clusterSets:
+    - bm-lco
+#  numberOfClusters: 2
+
+
+oc apply -f -<<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  labels:
+    app.kubernetes.io/instance: acm-gitops
+  name: bm-lco-post-install-cluster
+  namespace: openshift-gitops
+spec:
+  generators:
+    - matrix:
+        generators:
+          - git:
+              directories:
+                - path: cluster-config/*
+              repoURL: 'https://github.com/lcolagio/lab-acm'
+              revision: master
+          - clusterDecisionResource:
+              configMapRef: acm-placement
+              labelSelector:
+                matchLabels:
+                  cluster.open-cluster-management.io/placement: bm-lco
+  template:
+    metadata:
+      name: '{{name}}-post-install-{{path.basename}}'
+    spec:
+      destination:
+        name: '{{clusterName}}'
+        namespace: '{{path.basename}}'
+      project: dev
+      source:
+        path: '{{path}}'
+        repoURL: 'https://github.com/lcolagio/lab-acm'
+        targetRevision: master
+      syncPolicy:
+        automated: {}
+EOF

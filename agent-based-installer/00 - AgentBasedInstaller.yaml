@@ -1,0 +1,170 @@
+#############
+# Agent Base Installer
+#############
+> Red Hat ACM BM1
+https://multicloud-console.apps.bm1.redhat.hpecic.net/
+
+> Red Hat ACM OCP1
+https://multicloud-console.apps.ocp1.redhat.hpecic.net/
+
+
+> Oneview
+https://oneview.redhat.hpecic.net/
+
+
+#############
+# Images Installation
+#############
+* https://access.redhat.com/articles/6961617
+oc get clusterimagesets.hive.openshift.io | grep 4.11
+oc get clusterimagesets.hive.openshift.io img4.11.7-x86-64-appsub -o jsonpath={.metadata.labels.visible}
+
+oc get subscription hive-clusterimagesets-subscription-fast-0 -n open-cluster-management -oyaml
+oc get channel acm-hive-openshift-releases-chn-0 -n open-cluster-management -oyaml
+
+
+#############
+# Pull Secret & Key
+#############
+> Pull Secret
+<to complet>
+
+> .ssh id_rsa.pub
+<to complet>
+
+#############
+# SSH BASTION
+#############
+# Gère le DHCP / DNS sur le réseau Public
+> Bastion DHCP / DNS:
+via la clef public id_rsa.pub du mac
+- ssh hit@10.6.80.10
+
+> Bastion sshc:
+via la clef public id_rsa.pub du mac
+- ssh hit@10.6.82.67
+
+
+#############
+# DHCP Workload
+#############
+ssh hit@10.6.80.10
+sudo -i
+vi /opt/dhcp/hosts.json
+
+
+#############
+# bm5 Chassis
+#############
+https://oneview.redhat.hpecic.net/#/dashboard
+
+
+#############
+# bm5 ipstatic
+#############
+ssh : id_rsa.pub
+
+
+#############
+# bm5 Serveurs
+#############
+
+> ocp-bm5-master01
+#  BM5 BMC -> DHCP
+ 
+  Provisioning:
+  - eno49: 5E:2C:4A:50:03:49
+  - dhcp: 10.6.81.xxx
+  workload:
+  - eno50: 5E:2C:4A:50:03:4A
+  - dhcp: 10.6.82.39
+
+  ilo:
+  - https://10.11.14.203/irc.html
+
+# NMstate
+
+> ocp-bm5-master02
+#  BM5 BMC -> IPSTATIC
+
+  Provisioning:
+  - eno49: 5E:2C:4A:50:03:4D
+  workload:
+  - eno50: 5E:2C:4A:50:03:4E
+  ilo:
+  - https://10.11.14.211/irc.html
+
+# NMstate
+
+interfaces:
+- name: eno49
+  type: ethernet
+  state: down
+- name: eno50
+  type: ethernet
+  state: up
+  ipv4:
+    address:
+    - ip: 10.6.82.152
+      prefix-length: 24
+    enabled: true
+    dhcp: false
+  ipv6:
+    enabled: false
+dns-resolver:
+  config:
+    search:
+      - redhat.hpecic.net
+    server:
+    - 10.11.0.13
+routes:
+  config:
+  - destination: 0.0.0.0/0
+    next-hop-address: 10.6.82.1 
+    next-hop-interface: eno50
+    table-id: 254    
+
+
+> ocp-bm5-master03
+#  BM5 Discovery ISO -> DHCP
+
+  Provisioning:
+  - eno49: 5E:2C:4A:50:03:4B
+  workload:
+  - eno50: 5E:2C:4A:50:03:4C
+  ilo:
+  - https://10.11.14.205/irc.html
+
+# NMstate
+
+interfaces:
+- name: eno49
+  type: ethernet
+  state: down
+- name: eno50
+  type: ethernet
+  state: up
+  ipv4:
+    address:
+    - ip: 10.6.82.153
+      prefix-length: 24
+    enabled: true
+    dhcp: false
+  ipv6:
+    enabled: false
+dns-resolver:
+  config:
+    search:
+      - redhat.hpecic.net
+    server:
+    - 10.11.0.13
+routes:
+  config:
+  - destination: 0.0.0.0/0
+    next-hop-address: 10.6.82.1 
+    next-hop-interface: eno50
+    table-id: 254
+
+
+
+

@@ -1,0 +1,342 @@
+# # # # # # # # # # # # # # # # # # 
+# Zero Touch Provisioning (ZTP)
+# # # # # # # # # # # # # # # # # # 
+
+# Source Links: https://github.com/openshift/assisted-service/blob/master/docs/hive-integration/kube-api-getting-started.md#1-optional---create-nmstateconfig
+
+
+>ocp-bm5-master03
+HOST_INVENTORY=bm5-sno03
+HOST_INVENTORY_LOCATION=enclosure-c7000
+HOST_INVENTORY_NETWORKTYPE=static
+
+BARE_METAL_HOST=ocp-bm5-master03
+
+BARE_METAL_BMC_IP=10.11.14.205
+
+BARE_METAL_NETWORK_PROVISION_IP=DHCP
+BARE_METAL_NETWORK_PROVISION_INT='eno49'
+BARE_METAL_NETWORK_PROVISION_MAC='5E:2C:4A:50:03:4B'
+
+BARE_METAL_NETWORK_WORKLOAD_IP='10.6.82.153'
+BARE_METAL_NETWORK_WORKLOAD_INT='eno50'
+BARE_METAL_NETWORK_WORKLOAD_MAC='5E:2C:4A:50:03:4C'
+
+CLUSTER=bm5-sno03
+
+>ocp-bm5-master02
+HOST_INVENTORY=bm5-sno02
+HOST_INVENTORY_LOCATION=enclosure-c7000
+HOST_INVENTORY_NETWORKTYPE=static
+
+BARE_METAL_HOST=ocp-bm5-master02
+
+BARE_METAL_BMC_IP=10.11.14.211
+
+BARE_METAL_NETWORK_PROVISION_IP=DHCP
+BARE_METAL_NETWORK_PROVISION_INT='eno49'
+BARE_METAL_NETWORK_PROVISION_MAC='5E:2C:4A:50:03:4D'
+
+BARE_METAL_NETWORK_WORKLOAD_IP='10.6.82.152'
+BARE_METAL_NETWORK_WORKLOAD_INT='eno50'
+BARE_METAL_NETWORK_WORKLOAD_MAC='5E:2C:4A:50:03:4E'
+
+CLUSTER=bm5-sno02
+
+> Delete
+
+oc project ${CLUSTER}
+oc delete ManagedCluster ${CLUSTER}
+oc delete AgentClusterInstall ${CLUSTER}
+oc delete ClusterDeployment ${CLUSTER}
+oc delete BareMetalHost ${BARE_METAL_HOST}
+oc delete project ${CLUSTER}
+
+
+#########################
+# A - Cluster Prerequisites
+#########################
+
+cat <<EOF | oc create -f -
+---
+#STEP A.01
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CLUSTER}
+
+---
+# STEP 02
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pull-secret-${HOST_INVENTORY}
+  namespace: ${HOST_INVENTORY}
+data:
+  .dockerconfigjson: >-
+    <to complet>
+type: kubernetes.io/dockerconfigjson
+
+
+# STEP 03
+---
+apiVersion: hive.openshift.io/v1
+kind: ClusterImageSet
+metadata:
+  name: img4.11.20-x86-64-appsub
+spec:
+  releaseImage: quay.io/openshift-release-dev/ocp-release:4.11.20-x86_64
+EOF
+
+#########################
+# B - Creating Cluster Resources
+#########################
+
+cat <<EOF | oc create -f -
+---
+# STEP B.1
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+  labels:
+    # cluster.open-cluster-management.io/clusterset: default
+    # hive.openshift.io/cluster-platform: agent-baremetal
+spec:
+  baseDomain: redhat.hpecic.net
+  clusterInstallRef:
+    group: extensions.hive.openshift.io
+    kind: AgentClusterInstall
+    name: ${CLUSTER}
+    version: v1beta1
+  clusterName: ${CLUSTER}
+  controlPlaneConfig:
+    servingCertificates: {}
+  installed: false
+  platform:
+    agentBareMetal:
+      agentSelector:
+        matchLabels:
+          cluster-name: ${CLUSTER}
+  pullSecretRef:
+    name: pull-secret-${HOST_INVENTORY}
+EOF
+
+# At this point, there is no AgentClusterInstall, so it won't do much and won't even register the cluster.
+oc -n ${CLUSTER} get clusterdeployments.hive.openshift.io ${CLUSTER} -o=jsonpath="{.metadata.name}{'\n'}{range .status.conditions[*]}{.type}{'\t'}{.message}{'\n'}"
+
+cat <<EOF | oc create -f -
+---
+# STEP B.2
+apiVersion: extensions.hive.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+spec:
+  clusterDeploymentRef:
+    name: ${CLUSTER} # Use the clusterDeployment name from the previous step
+  holdInstallation: false
+  imageSetRef:
+    name: img4.11.20-x86-64-appsub # Use the ClusterImageSet name mentioned in Cluster Prerequisites step 3
+  networking:
+    clusterNetwork:
+      - cidr: 10.128.0.0/14
+        hostPrefix: 23
+    machineNetwork:
+      - cidr: 10.6.82.0/24
+    serviceNetwork:
+      - 172.30.0.0/16
+    userManagedNetworking: true
+  provisionRequirements:
+    controlPlaneAgents: 1
+  #sshPublicKey: ssh-rsa your-public-key-here (optional)  
+  sshPublicKey: >-
+    ssh-rsa
+    AAAAB3NzaC1yc2EAAAADAQABAAAEAQCefCUYNfih7lQZJDd4hPZVlf5U4Kwc6DqAFQrKpD+rRrtRLJn5LVLIAa5pRE0xbl7cSsK5XqJVwQOtY9bXv6sdBmh7SHeMY61MOIrwZjDOZJuco6WYwBlCkMbzi/dcurFWcjIMc2N4fXnlrfWWRwBittoLktjwhlp6CpGy7SFoqrhXsX4Jb+aX12ZwgAGFV8laudjwE/Ou6aDMf6E/3kUbw7UOUkQ7Gzb8mRrdDuJtBK0ygRQGUoJYJydUfg5IqorwB59Omxj8GsqUH6xUud8VhlgvwYEnJXDngNvgoEhxa4vjv83vEIXoI8NZr7ft8ew9oaUmohSSG40mBYkzJUKDz/FO8zAjcW+JAWd2e/vPvYFzxXJ+uKVv/XKxsKB9oz9PQQG7OllT6DDlFORi6S75QjkqBgGGIbgRz6p93HCaRdA8Mc2J5/JYMZ/r/QHQG56rfZMEgYPIvgIDvSg3VtHJQp+oDCUCjMqFOU+Va2gqwV2RY8wPe7jkC7B3BFRzodpRP8Swm2rZSnJlp/ZAuD+FJv/OI3N2IqxFKXjnDR9ioUyvdFzmyEYpKheE7dtNpVGPyEVc3xhL69XgF4eDJvCAwVHjyn0ryR6Q3zFwUwurqRc60j+Myzikd1WD/5bv8fLYqcRLi+pEyAeAXZYWtpciW/V4xoVwXDKqy07j+ebBTGQblQZYEjH7J4zzpEFLdJekzhCWatmWx7kkq7LvE4Sa7SgVnaC+JMBPhcaWc2zEEyi8kMYpDVoRuRsxU0vtHfk5ZShGegzEfynnmabK/8YhDDXS5TVB1ycRndeDi+AkWVWZ9KsVdcHTImXM2x4SS1GxG5E9Fnw+1PdZ0YHbrpyyVr37/kVXy02hX8CunTYISFT7RVi+xEB5GfszX1tkzknBm/jd8bdAPUfSKWwuQEtqbk5emXexWrjAmKot6PUAY5NA1TFvgZCPEk6Uzla7lZGsMElee8sSy8IIBLLwpoMt5IpVuuo4csjxUD6vd9HrI6nS2Ms2UWuvL9Fv13WBb9sSh5uie92bk5sWE8yhYkPFzbZacV08OhMP8t/FepFlHuwEc/q+OWj51Zm54paLwTcuajpNaYZsvTarfPyLwxh5wk+1wZLlbvr1cPLEE/9BRFf1p+ab4jvtU9cXaN7BaUXJAXM4DnRLecG09APUH1QBPKuu9tL1wuSZvKIRav1TzO1DsMj/0F5grxTW3rcCUaqKqjUbbstLvfeph3W3RdRVxfEtqHlIwMi7gEzCB4lnL7Qn7rqyemWhagHqa9nyClCyDxG8tFXuaHtrRk1k/fbGxeDmQ5X4AbsXUqjRq095+cwF0Yr+t30YTOKLO5NA/WLJMYBQgh7ZkEMOLamrUdt1
+    lcolagio@MacBook-Pro
+
+EOF
+
+# The cluster is fully defined in assisted-service backend (PostgreSQL DB).
+# No discovery image has been created at this point.
+
+oc -n ${CLUSTER} get agentclusterinstalls.extensions.hive.openshift.io ${CLUSTER} -o=jsonpath="{.metadata.name}{'\n'}{range .status.conditions[*]}{.type}{'\t'}{.message}{'\n'}"
+
+
+#########################
+# C - Generate Cluster Discovery Image
+#########################
+
+cat <<EOF | oc create -f -
+---
+# STEP C.01
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  name: bm5-ipstatic-${BARE_METAL_HOST}
+  namespace: ${HOST_INVENTORY}
+  labels:
+    # agent-install.openshift.io/bmh: ${BARE_METAL_HOST}
+    # infraenvs.agent-install.openshift.io: ${HOST_INVENTORY}
+    nmstate-label: ${HOST_INVENTORY} # both the label name and value must be included in InfraEnv nmStateConfigLabelSelector matchLabels
+spec:
+  config:
+    dns-resolver:
+      config:
+        search:
+          - redhat.hpecic.net
+        server:
+          - 10.11.0.13
+    interfaces:
+      - name: eno49
+        state: down
+        type: ethernet
+      - ipv4:
+          address:
+            - ip: ${BARE_METAL_NETWORK_WORKLOAD_IP}
+              prefix-length: 24
+          dhcp: false
+          enabled: true
+        ipv6:
+          enabled: false
+        name: eno50
+        state: up
+        type: ethernet
+    routes:
+      config:
+        - destination: 0.0.0.0/0
+          next-hop-address: 10.6.82.1
+          next-hop-interface: eno50
+          table-id: 254
+  interfaces:
+    - macAddress: ${BARE_METAL_NETWORK_PROVISION_MAC}
+      name: eno49
+    - macAddress: ${BARE_METAL_NETWORK_WORKLOAD_MAC}
+      name: eno50
+
+---  
+apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  name: ${HOST_INVENTORY}
+  namespace: ${HOST_INVENTORY}
+  labels:
+    agentclusterinstalls.extensions.hive.openshift.io/location: ${HOST_INVENTORY_LOCATION}
+    networkType: ${HOST_INVENTORY_NETWORKTYPE}    
+spec:
+  clusterRef:
+    name: ${CLUSTER} # Use the above created clusterDeployment resource name and namespace
+    namespace: ${CLUSTER}
+  pullSecretRef: 
+    name: pull-secret-${HOST_INVENTORY}
+ #sshAuthorizedKey: 'your_pub_key_here' (optional) , this key will allow to connect to machines booted from the discovery ISO.
+  sshAuthorizedKey: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAEAQCefCUYNfih7lQZJDd4hPZVlf5U4Kwc6DqAFQrKpD+rRrtRLJn5LVLIAa5pRE0xbl7cSsK5XqJVwQOtY9bXv6sdBmh7SHeMY61MOIrwZjDOZJuco6WYwBlCkMbzi/dcurFWcjIMc2N4fXnlrfWWRwBittoLktjwhlp6CpGy7SFoqrhXsX4Jb+aX12ZwgAGFV8laudjwE/Ou6aDMf6E/3kUbw7UOUkQ7Gzb8mRrdDuJtBK0ygRQGUoJYJydUfg5IqorwB59Omxj8GsqUH6xUud8VhlgvwYEnJXDngNvgoEhxa4vjv83vEIXoI8NZr7ft8ew9oaUmohSSG40mBYkzJUKDz/FO8zAjcW+JAWd2e/vPvYFzxXJ+uKVv/XKxsKB9oz9PQQG7OllT6DDlFORi6S75QjkqBgGGIbgRz6p93HCaRdA8Mc2J5/JYMZ/r/QHQG56rfZMEgYPIvgIDvSg3VtHJQp+oDCUCjMqFOU+Va2gqwV2RY8wPe7jkC7B3BFRzodpRP8Swm2rZSnJlp/ZAuD+FJv/OI3N2IqxFKXjnDR9ioUyvdFzmyEYpKheE7dtNpVGPyEVc3xhL69XgF4eDJvCAwVHjyn0ryR6Q3zFwUwurqRc60j+Myzikd1WD/5bv8fLYqcRLi+pEyAeAXZYWtpciW/V4xoVwXDKqy07j+ebBTGQblQZYEjH7J4zzpEFLdJekzhCWatmWx7kkq7LvE4Sa7SgVnaC+JMBPhcaWc2zEEyi8kMYpDVoRuRsxU0vtHfk5ZShGegzEfynnmabK/8YhDDXS5TVB1ycRndeDi+AkWVWZ9KsVdcHTImXM2x4SS1GxG5E9Fnw+1PdZ0YHbrpyyVr37/kVXy02hX8CunTYISFT7RVi+xEB5GfszX1tkzknBm/jd8bdAPUfSKWwuQEtqbk5emXexWrjAmKot6PUAY5NA1TFvgZCPEk6Uzla7lZGsMElee8sSy8IIBLLwpoMt5IpVuuo4csjxUD6vd9HrI6nS2Ms2UWuvL9Fv13WBb9sSh5uie92bk5sWE8yhYkPFzbZacV08OhMP8t/FepFlHuwEc/q+OWj51Zm54paLwTcuajpNaYZsvTarfPyLwxh5wk+1wZLlbvr1cPLEE/9BRFf1p+ab4jvtU9cXaN7BaUXJAXM4DnRLecG09APUH1QBPKuu9tL1wuSZvKIRav1TzO1DsMj/0F5grxTW3rcCUaqKqjUbbstLvfeph3W3RdRVxfEtqHlIwMi7gEzCB4lnL7Qn7rqyemWhagHqa9nyClCyDxG8tFXuaHtrRk1k/fbGxeDmQ5X4AbsXUqjRq095+cwF0Yr+t30YTOKLO5NA/WLJMYBQgh7ZkEMOLamrUdt1 lcolagio@MacBook-Pro'
+  nmStateConfigLabelSelector:
+    matchLabels:
+      nmstate-label: ${HOST_INVENTORY} # both the label name and value must match the NMStateConfig label section
+
+EOF
+
+# Discovery Image Created.
+# Note that the log does specify that nmStateConfigs were included.
+oc -n ${CLUSTER} get infraenvs.agent-install.openshift.io ${HOST_INVENTORY} -o=jsonpath="{.metadata.name}{'\n'}{range .status.conditions[*]}{.type}{'\t'}{.message}{'\n'}"
+
+
+#########################
+# D - Boot The Host From The Discovery Image
+#########################
+# STEP D.01
+# Download the image
+> Download iso
+IMAGE_ISO=$(oc -n ${CLUSTER} get infraenvs.agent-install.openshift.io ${CLUSTER}  -o=jsonpath="{.status.createdTime}{'\n'}{.status.isoDownloadURL}{'\n'}")
+echo $IMAGE_ISO
+wget --no-check-certificate -O assisted-image-${CLUSTER}.iso ${IMAGE_ISO}
+# curl --insecure -o image.iso $(oc -n ${CLUSTER} get infraenvs.agent-install.openshift.io ${CLUSTER} -o=jsonpath="{.status.isoDownloadURL}")
+
+# STEP D.02
+> Use virtual media / USB drive / other methods to boot your host using the discovery image.
+
+# STEP D.03
+# Get the full event list here:
+curl -s -k $(oc -n ${CLUSTER} get agentclusterinstalls.extensions.hive.openshift.io ${CLUSTER} -o=jsonpath="{.status.debugInfo.eventsURL}")  | jq "."
+
+# STEP D.04
+#Host discovery change hostname and approval
+oc -n ${CLUSTER} get agents
+>NAME                                   CLUSTER     APPROVED   ROLE     STAGE
+>1d629bbd-30c2-4177-8b6e-f53be054d86b   bm5-sno02   true       master
+HOST_AGENT=$(oc get agent -n ${CLUSTER} -o name)
+echo ${HOST_AGENT}
+oc -n ${CLUSTER} patch ${HOST_AGENT} -p '{"spec":{"hostname":'\"${BARE_METAL_HOST}\"'}}' --type merge
+oc -n ${CLUSTER} patch ${HOST_AGENT} -p '{"spec":{"approved":true}}' --type merge
+curl -s -k $(oc -n ${CLUSTER} get ${HOST_AGENT}  -o=jsonpath="{.status.debugInfo.eventsURL}") | jq "."
+
+# Pas nécessaire d'associer un clustername car implicitement ajouter via l'infraenv. 
+ # oc -n ${CLUSTER} patch ${HOST_AGENT} -p '{"spec":{"clusterDeploymentName":{"name":'\"${CLUSTER}\"',"namespace":'\"${CLUSTER}\"'}}}' --type merge
+ # oc -n ${CLUSTER} get ${HOST_AGENT}  -o=jsonpath='{.spec.clusterDeploymentName}'
+
+# Cluster Installation start
+oc -n ${CLUSTER} patch agentclusterinstalls ${CLUSTER} -p '{"spec":{"holdInstallation":false}}' --type merge
+curl -s -k $(oc -n ${CLUSTER} get agentclusterinstalls.extensions.hive.openshift.io ${CLUSTER} -o=jsonpath="{.status.debugInfo.eventsURL}")  | jq "."
+
+# Suivre l'installation avec les commandes suivantes:
+oc -n ${CLUSTER} get clusterdeployments.hive.openshift.io ${CLUSTER} -o=jsonpath="{.metadata.name}{'\n'}{range .status.conditions[*]}{.type}{'\t'}{.message}{'\n'}"
+oc -n ${CLUSTER} get agentclusterinstalls.extensions.hive.openshift.io ${CLUSTER} -o=jsonpath="{.metadata.name}{'\n'}{range .status.conditions[*]}{.type}{'\t'}{.message}{'\n'}"
+
+
+
+#########################
+# E - Add cluster to Managaged
+#########################
+
+cat <<EOF | oc create -f -
+---
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: ${CLUSTER}
+  labels:
+    cloud: hybrid
+    cluster.open-cluster-management.io/clusterset: default
+    feature.open-cluster-management.io/addon-cert-policy-controller: unreachable
+    feature.open-cluster-management.io/addon-cluster-proxy: unreachable
+    feature.open-cluster-management.io/addon-search-collector: unreachable
+    lab: luigi
+    name: ${CLUSTER}
+spec:
+  hubAcceptsClient: true
+  leaseDurationSeconds: 60
+
+---
+apiVersion: agent.open-cluster-management.io/v1
+kind: KlusterletAddonConfig
+metadata:
+  name: ${CLUSTER}
+  namespace: ${CLUSTER}
+spec:
+  applicationManager:
+    enabled: true
+  certPolicyController:
+    enabled: true
+  clusterLabels:
+    cloud: hybrid
+  clusterName: ${CLUSTER}
+  clusterNamespace: ${CLUSTER}
+  iamPolicyController:
+    enabled: true
+  policyController:
+    enabled: true
+  searchCollector:
+    enabled: true
+EOF
+
+
+#########################
+# X - Annexes
+#########################
+
+
+# oc -n ${CLUSTER} get infraenvs.agent-install.openshift.io ${CLUSTER} -o=jsonpath="{'iPXE Script Download URL: '}{.status.bootArtifacts.ipxeScript}{'\n'}{'Initrd Download URL: '}{.status.bootArtifacts.initrd}{'\n'}{'Rootfs Download URL: '}{.status.bootArtifacts.rootfs}{'\n'}{'Kernel Download URL: '}{.status.bootArtifacts.kernel}{'\n'}"
+

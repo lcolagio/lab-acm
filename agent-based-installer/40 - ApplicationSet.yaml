@@ -1,0 +1,117 @@
+---
+# Deploy a Conf Ops
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: bm-lco-conf-banner
+  namespace: openshift-gitops
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: bm-lco
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      labels:
+        velero.io/exclude-from-backup: 'true'
+      name: 'bm-lco-conf-banner-{{name}}'
+    spec:
+      destination:
+        namespace: default
+        server: '{{server}}'
+      project: dev
+      source:
+        path: 'cluster-config-v2/banner/overlays/{{name}}'
+        repoURL: 'https://github.com/lcolagio/lab-acm'
+        targetRevision: master
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+
+---
+# Deploy an Application
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: bm-lco-app
+  namespace: openshift-gitops
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: bm-lco
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      labels:
+        velero.io/exclude-from-backup: 'true'
+      name: 'bm-lco-app-{{name}}'
+    spec:
+      destination:
+        namespace: bgdk
+        server: '{{server}}'
+      project: dev
+      source:
+        path: apps/bgd/overlays/bgdk
+        repoURL: 'https://github.com/RedHat-EMEA-SSA-Team/ns-apps/'
+        targetRevision: single-app
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PruneLast=true
+          - ApplyOutOfSyncOnly=false
+
+
+---
+# Deploy a list of Conf Ops
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  labels:
+    app.kubernetes.io/instance: acm-gitops
+  name: bm-lco-post-install-cluster
+  namespace: openshift-gitops
+spec:
+  generators:
+    - matrix:
+        generators:
+          - git:
+              directories:
+                - path: cluster-config/*
+              repoURL: 'https://github.com/lcolagio/lab-acm'
+              revision: master
+          - clusterDecisionResource:
+              configMapRef: acm-placement
+              labelSelector:
+                matchLabels:
+                  cluster.open-cluster-management.io/placement: bm-lco
+  template:
+    metadata:
+      name: '{{name}}-post-install-{{path.basename}}'
+    spec:
+      destination:
+        name: '{{clusterName}}'
+        namespace: '{{path.basename}}'
+      project: dev
+      source:
+        path: '{{path}}'
+        repoURL: 'https://github.com/lcolagio/lab-acm'
+        targetRevision: master
+      syncPolicy:
+        automated: {}
+
+
+---
+luigi
